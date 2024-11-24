@@ -7,7 +7,6 @@ import (
     "math/rand"
     "time"
     "sort"
-    "strings"
     "github.com/gin-gonic/gin"
 )
 
@@ -49,7 +48,7 @@ type FoodRules struct {
     StandardPortion float64  `json:"standardPortion"`
     Unit            string   `json:"unit"`
     CaloriesPer100g float64  `json:"caloriesPer100g"`
-    Category        string   `json:"category"`
+    Category        string   `json:"category"` // protein, carb, fat, vegetable, fruit, beverage
     Description     string   `json:"description"`
     MealTypes       []string `json:"mealTypes"`
     MinPortion      float64  `json:"minPortion"`
@@ -80,17 +79,6 @@ var mealRules = map[string]MealRules{
         MinCarbs:   30,
         MaxFat:     15,
     },
-    "spuntino": {
-        RequiredCategories: []string{"fruit", "carb"},
-        CategoryLimits: map[string]float64{
-            "fruit": 100,
-            "carb":  150,
-            "fat":   100,
-        },
-        MinProtein: 0,
-        MinCarbs:   15,
-        MaxFat:     10,
-    },
     "pranzo": {
         RequiredCategories: []string{"carb", "protein", "vegetable"},
         CategoryLimits: map[string]float64{
@@ -102,17 +90,6 @@ var mealRules = map[string]MealRules{
         MinProtein: 30,
         MinCarbs:   60,
         MaxFat:     25,
-    },
-    "merenda": {
-        RequiredCategories: []string{"fruit", "carb"},
-        CategoryLimits: map[string]float64{
-            "fruit": 100,
-            "carb":  150,
-            "fat":   100,
-        },
-        MinProtein: 0,
-        MinCarbs:   15,
-        MaxFat:     10,
     },
     "cena": {
         RequiredCategories: []string{"protein", "vegetable", "carb"},
@@ -128,6 +105,8 @@ var mealRules = map[string]MealRules{
     },
 }
 
+// Database delle regole alimentari
+// Database delle regole alimentari basato sul PDF
 var foodRules = map[string]FoodRules{
     // BEVANDE
     "caffe": {
@@ -569,9 +548,23 @@ var foodRules = map[string]FoodRules{
         MinPortion:      150,
         MaxPortion:      200,
         Required:        true,
-        Frequency:       2,
+        Frequency:       3,
+    },
+    "frutta_secca": {
+        Name:            "Frutta secca e oleosa",
+        StandardPortion: 20,
+        Unit:            "g",
+        CaloriesPer100g: 600,
+        Category:        "fat",
+        Description:     "media",
+        MealTypes:       []string{"spuntino", "merenda"},
+        MinPortion:      20,
+        MaxPortion:      30,
+        Required:        false,
+        Frequency:       1,
     },
 }
+
 
 // Helper functions
 func calculateCalories(quantity float64, caloriesPer100g float64) float64 {
@@ -601,6 +594,20 @@ func getCategoryCalories(items []Food, category string) float64 {
     return calories
 }
 
+func containsFood(items []Food, foodName string) bool {
+    foodRule, exists := foodRules[foodName]
+    if !exists {
+        return false
+    }
+    
+    for _, item := range items {
+        if item.Name == foodRule.Name {
+            return true
+        }
+    }
+    return false
+}
+
 func isAppropriateForMeal(rule FoodRules, mealType string) bool {
     for _, allowedMeal := range rule.MealTypes {
         if allowedMeal == mealType {
@@ -610,7 +617,7 @@ func isAppropriateForMeal(rule FoodRules, mealType string) bool {
     return false
 }
 
-func addFoodItem(items *[]Food, totalCalories *float64, rule FoodRules, targetCalories float64) bool {
+func addFoodItem(items *[]Food, totalCalories *float64, rule FoodRules, targetCalories float64) {
     calories := calculateCalories(rule.StandardPortion, rule.CaloriesPer100g)
     if *totalCalories + calories <= targetCalories {
         *items = append(*items, Food{
@@ -620,14 +627,11 @@ func addFoodItem(items *[]Food, totalCalories *float64, rule FoodRules, targetCa
             Calories: math.Round(calories),
         })
         *totalCalories += calories
-        return true
     }
-    return false
 }
 
 // Funzione per organizzare gli ingredienti
 func organizeIngredients() []MealIngredients {
-    // Mappa iniziale per organizzare gli ingredienti per pasto e categoria
     mealMap := map[string]map[string][]string{
         "colazione": {
             "Bevande":    {},
@@ -661,7 +665,6 @@ func organizeIngredients() []MealIngredients {
         },
     }
 
-    // Mapping delle categorie interne alle categorie visualizzate
     categoryMapping := map[string]string{
         "beverage":  "Bevande",
         "carb":      "Carboidrati",
@@ -671,118 +674,122 @@ func organizeIngredients() []MealIngredients {
         "fat":       "Extra",
     }
 
-    // Mappa per tenere traccia degli ingredienti già aggiunti in ogni pasto
-    seenInMeal := make(map[string]map[string]bool)
-    for mealType := range mealMap {
-        seenInMeal[mealType] = make(map[string]bool)
-    }
-
     // Popola la mappa con gli ingredienti
     for key, rule := range foodRules {
         displayCategory := categoryMapping[rule.Category]
-        if displayCategory == "" {
-            displayCategory = "Extra"
-        }
-
         for _, mealType := range rule.MealTypes {
             if categories, exists := mealMap[mealType]; exists {
-                if !seenInMeal[mealType][key] {
-                    categories[displayCategory] = append(
-                        categories[displayCategory],
-                        key,
-                    )
-                    seenInMeal[mealType][key] = true
+                if displayCategory == "" {
+                    displayCategory = "Extra"
                 }
+                categories[displayCategory] = append(
+                    categories[displayCategory],
+                    key,
+                )
             }
         }
     }
 
     // Converti la mappa in slice per il JSON
     var result []MealIngredients
-    
-    // Ordine predefinito dei pasti
-    mealOrder := []string{"colazione", "spuntino", "pranzo", "merenda", "cena"}
-    
-    for _, mealType := range mealOrder {
-        if categories, exists := mealMap[mealType]; exists {
-            var mealCategories []IngredientCategory
-            
-            // Ordine predefinito delle categorie
-            categoryOrder := []string{"Bevande", "Carboidrati", "Proteine", "Verdure", "Frutta", "Snack", "Extra"}
-            
-            for _, catName := range categoryOrder {
-                if ingredients, exists := categories[catName]; exists && len(ingredients) > 0 {
-                    // Ordina gli ingredienti alfabeticamente
-                    sort.Strings(ingredients)
-                    mealCategories = append(mealCategories, IngredientCategory{
-                        Name:        catName,
-                        Ingredients: ingredients,
-                    })
-                }
-            }
-
-            result = append(result, MealIngredients{
-                MealName:   strings.Title(mealType),
-                Categories: mealCategories,
-            })
-        }
+    mealNames := map[string]string{
+        "colazione": "Colazione",
+        "spuntino":  "Spuntino",
+        "pranzo":    "Pranzo",
+        "merenda":   "Merenda",
+        "cena":      "Cena",
     }
+
+    // Ordina gli ingredienti all'interno di ogni categoria
+    for mealType, categories := range mealMap {
+        var mealCategories []IngredientCategory
+        for catName, ingredients := range categories {
+            if len(ingredients) > 0 {
+                sort.Strings(ingredients) // Ordina gli ingredienti alfabeticamente
+                mealCategories = append(mealCategories, IngredientCategory{
+                    Name:        catName,
+                    Ingredients: ingredients,
+                })
+            }
+        }
+        // Ordina le categorie per nome
+        sort.Slice(mealCategories, func(i, j int) bool {
+            return mealCategories[i].Name < mealCategories[j].Name
+        })
+        result = append(result, MealIngredients{
+            MealName:   mealNames[mealType],
+            Categories: mealCategories,
+        })
+    }
+
+    // Ordina i pasti nell'ordine corretto della giornata
+    sort.Slice(result, func(i, j int) bool {
+        mealOrder := map[string]int{
+            "Colazione": 1,
+            "Spuntino":  2,
+            "Pranzo":    3,
+            "Merenda":   4,
+            "Cena":      5,
+        }
+        return mealOrder[result[i].MealName] < mealOrder[result[j].MealName]
+    })
 
     return result
 }
 
-// Funzione per generare il piano pasti
+// Meal generation function
 func generateMealWithUserIngredients(mealType string, userIngredients []string, targetCalories float64) Meal {
     rand.Seed(time.Now().UnixNano())
     
     var items []Food
     var totalCalories float64 = 0
     rules := mealRules[mealType]
-    addedCategories := make(map[string]bool)
 
-    // 1. Prima aggiungi gli ingredienti dell'utente che sono appropriati per questo pasto
-    for _, ing := range userIngredients {
-        if rule, exists := foodRules[ing]; exists {
-            if isAppropriateForMeal(rule, mealType) && !addedCategories[rule.Category] {
-                if categoryLimit, ok := rules.CategoryLimits[rule.Category]; ok {
-                    calories := calculateCalories(rule.StandardPortion, rule.CaloriesPer100g)
-                    if calories <= categoryLimit && totalCalories + calories <= targetCalories {
-                        if addFoodItem(&items, &totalCalories, rule, targetCalories) {
-                            addedCategories[rule.Category] = true
-                        }
+    // 1. Aggiungi elementi obbligatori per il tipo di pasto
+    for _, category := range rules.RequiredCategories {
+        if !containsCategory(items, category) {
+            // Cerca prima tra gli ingredienti dell'utente
+            found := false
+            for _, ing := range userIngredients {
+                if rule, exists := foodRules[ing]; exists {
+                    if rule.Category == category && isAppropriateForMeal(rule, mealType) {
+                        addFoodItem(&items, &totalCalories, rule, targetCalories)
+                        found = true
+                        break
+                    }
+                }
+            }
+            
+            // Se non trovato tra gli ingredienti dell'utente, aggiungi uno standard
+            if !found {
+                var standardFoods []string
+                for k, v := range foodRules {
+                    if v.Category == category && isAppropriateForMeal(v, mealType) {
+                        standardFoods = append(standardFoods, k)
+                    }
+                }
+                if len(standardFoods) > 0 {
+                    randomIndex := rand.Intn(len(standardFoods))
+                    if rule, exists := foodRules[standardFoods[randomIndex]]; exists {
+                        addFoodItem(&items, &totalCalories, rule, targetCalories)
                     }
                 }
             }
         }
     }
 
-    // 2. Poi aggiungi gli elementi obbligatori mancanti
-    for _, category := range rules.RequiredCategories {
-        if !containsCategory(items, category) {
-            var availableIngredients []string
-            for k, v := range foodRules {
-                if v.Category == category && isAppropriateForMeal(v, mealType) {
-                    availableIngredients = append(availableIngredients, k)
+    // 2. Aggiungi altri ingredienti dell'utente se appropriati
+    for _, ing := range userIngredients {
+        if rule, exists := foodRules[ing]; exists {
+            if isAppropriateForMeal(rule, mealType) && totalCalories < targetCalories {
+                if categoryLimit, ok := rules.CategoryLimits[rule.Category]; ok {
+                    currentCatCals := getCategoryCalories(items, rule.Category)
+                    calories := calculateCalories(rule.StandardPortion, rule.CaloriesPer100g)
+                    if currentCatCals + calories <= categoryLimit {
+                        addFoodItem(&items, &totalCalories, rule, targetCalories)
+                    }
                 }
             }
-            if len(availableIngredients) > 0 {
-                randomIndex := rand.Intn(len(availableIngredients))
-                if rule, exists := foodRules[availableIngredients[randomIndex]]; exists {
-                    addFoodItem(&items, &totalCalories, rule, targetCalories)
-                }
-            }
-        }
-    }
-
-    // 3. Per spuntino e merenda, assicurati di avere almeno frutta o snack
-    if (mealType == "spuntino" || mealType == "merenda") && len(items) == 0 {
-        // Prova ad aggiungere frutta
-        if rule, exists := foodRules["frutta_fresca"]; exists {
-            addFoodItem(&items, &totalCalories, rule, targetCalories)
-        }
-        // Prova ad aggiungere crackers
-        if rule, exists := foodRules["crackers_integrali"]; exists {
-            addFoodItem(&items, &totalCalories, rule, targetCalories)
         }
     }
 
@@ -811,9 +818,7 @@ func main() {
 
     // Routes
     r.GET("/api/ingredients", func(c *gin.Context) {
-        ingredients := organizeIngredients()
-        log.Printf("Sending %d meal categories", len(ingredients))
-        c.JSON(http.StatusOK, ingredients)
+        c.JSON(http.StatusOK, organizeIngredients())
     })
 
     r.POST("/api/generate-plan", func(c *gin.Context) {
@@ -826,9 +831,6 @@ func main() {
             c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
             return
         }
-
-        log.Printf("Generating plan for %d ingredients, target calories: %d", 
-            len(request.Ingredients), request.TargetCalories)
 
         plan := MealPlan{
             Colazione: generateMealWithUserIngredients("colazione", request.Ingredients, float64(request.TargetCalories)*0.25),
