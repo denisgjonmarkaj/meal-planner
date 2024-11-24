@@ -7,6 +7,7 @@ pipeline {
         BUILD_VERSION = "${BUILD_NUMBER}"
         GOROOT = '/usr/local/go'
         PATH = "${env.GOROOT}/bin:${env.PATH}"
+        NODE_OPTIONS = "--openssl-legacy-provider"  // Aggiunto per risolvere l'errore OpenSSL
     }
 
     tools {
@@ -29,42 +30,13 @@ pipeline {
             }
         }
 
-        stage('Fix Frontend Config') {
-            steps {
-                dir('frontend') {
-                    sh '''
-                        echo '{
-                          "compilerOptions": {
-                            "target": "es5",
-                            "lib": ["dom", "dom.iterable", "esnext"],
-                            "baseUrl": "src",
-                            "allowJs": true,
-                            "skipLibCheck": true,
-                            "esModuleInterop": true,
-                            "allowSyntheticDefaultImports": true,
-                            "strict": true,
-                            "forceConsistentCasingInFileNames": true,
-                            "noFallthroughCasesInSwitch": true,
-                            "module": "esnext",
-                            "moduleResolution": "node",
-                            "resolveJsonModule": true,
-                            "isolatedModules": true,
-                            "noEmit": true,
-                            "jsx": "react-jsx"
-                          },
-                          "include": ["src"]
-                        }' > tsconfig.json
-                    '''
-                }
-            }
-        }
-
         stage('Install Dependencies') {
             parallel {
                 stage('Frontend') {
                     steps {
                         dir('frontend') {
                             sh '''
+                                export NODE_OPTIONS=--openssl-legacy-provider
                                 npm ci
                                 npm audit fix --force || true
                             '''
@@ -75,10 +47,7 @@ pipeline {
                 stage('Backend') {
                     steps {
                         dir('backend') {
-                            sh '''
-                                export PATH=$PATH:/usr/local/go/bin
-                                go mod download || true
-                            '''
+                            sh 'go mod download || true'
                         }
                     }
                 }
@@ -91,7 +60,9 @@ pipeline {
                     steps {
                         dir('frontend') {
                             sh '''
-                                CI=true npm run build
+                                export NODE_OPTIONS=--openssl-legacy-provider
+                                export CI=true
+                                npm run build
                                 docker build -t ${DOCKER_REGISTRY}/meal-planner-frontend:${BUILD_VERSION} .
                             '''
                         }
@@ -107,6 +78,7 @@ pipeline {
                                     docker build -t ${DOCKER_REGISTRY}/meal-planner-backend:${BUILD_VERSION} .
                                 else
                                     echo "No main.go found in backend directory"
+                                    ls -la
                                     exit 1
                                 fi
                             '''
