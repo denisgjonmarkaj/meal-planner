@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tag, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from '../../components/ui/button';  // Path relativo
 import {
   Select,
   SelectContent,
@@ -9,7 +9,7 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "../../components/ui/select";  // Path relativo
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import CalorieSummary from './CalorieSummary';
 
