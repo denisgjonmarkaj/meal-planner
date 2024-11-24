@@ -7,7 +7,7 @@ pipeline {
         BUILD_VERSION = "${BUILD_NUMBER}"
         GOROOT = '/usr/local/go'
         PATH = "${env.GOROOT}/bin:${env.PATH}"
-        NODE_OPTIONS = "--openssl-legacy-provider"  // Aggiunto per risolvere l'errore OpenSSL
+        NODE_OPTIONS = "--openssl-legacy-provider"
     }
 
     tools {
@@ -73,14 +73,20 @@ pipeline {
                     steps {
                         dir('backend') {
                             sh '''
+                                # Verifica se il file main.go esiste
                                 if [ -f main.go ]; then
+                                    echo "Building from root main.go"
                                     CGO_ENABLED=0 GOOS=linux go build -o main .
-                                    docker build -t ${DOCKER_REGISTRY}/meal-planner-backend:${BUILD_VERSION} .
+                                elif [ -f cmd/main.go ]; then
+                                    echo "Building from cmd/main.go"
+                                    CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/
                                 else
                                     echo "No main.go found in backend directory"
                                     ls -la
                                     exit 1
                                 fi
+                                
+                                docker build -t ${DOCKER_REGISTRY}/meal-planner-backend:${BUILD_VERSION} .
                             '''
                         }
                     }
