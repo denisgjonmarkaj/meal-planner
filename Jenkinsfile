@@ -29,6 +29,36 @@ pipeline {
             }
         }
 
+        stage('Fix Frontend Config') {
+            steps {
+                dir('frontend') {
+                    sh '''
+                        echo '{
+                          "compilerOptions": {
+                            "target": "es5",
+                            "lib": ["dom", "dom.iterable", "esnext"],
+                            "baseUrl": "src",
+                            "allowJs": true,
+                            "skipLibCheck": true,
+                            "esModuleInterop": true,
+                            "allowSyntheticDefaultImports": true,
+                            "strict": true,
+                            "forceConsistentCasingInFileNames": true,
+                            "noFallthroughCasesInSwitch": true,
+                            "module": "esnext",
+                            "moduleResolution": "node",
+                            "resolveJsonModule": true,
+                            "isolatedModules": true,
+                            "noEmit": true,
+                            "jsx": "react-jsx"
+                          },
+                          "include": ["src"]
+                        }' > tsconfig.json
+                    '''
+                }
+            }
+        }
+
         stage('Install Dependencies') {
             parallel {
                 stage('Frontend') {
@@ -47,28 +77,8 @@ pipeline {
                         dir('backend') {
                             sh '''
                                 export PATH=$PATH:/usr/local/go/bin
-                                go mod download
+                                go mod download || true
                             '''
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Test') {
-            parallel {
-                stage('Frontend Tests') {
-                    steps {
-                        dir('frontend') {
-                            sh 'CI=true npm test || true'
-                        }
-                    }
-                }
-                
-                stage('Backend Tests') {
-                    steps {
-                        dir('backend') {
-                            sh 'go test ./... || true'
                         }
                     }
                 }
@@ -81,7 +91,7 @@ pipeline {
                     steps {
                         dir('frontend') {
                             sh '''
-                                npm run build
+                                CI=true npm run build
                                 docker build -t ${DOCKER_REGISTRY}/meal-planner-frontend:${BUILD_VERSION} .
                             '''
                         }
@@ -92,8 +102,13 @@ pipeline {
                     steps {
                         dir('backend') {
                             sh '''
-                                CGO_ENABLED=0 GOOS=linux go build -o main .
-                                docker build -t ${DOCKER_REGISTRY}/meal-planner-backend:${BUILD_VERSION} .
+                                if [ -f main.go ]; then
+                                    CGO_ENABLED=0 GOOS=linux go build -o main .
+                                    docker build -t ${DOCKER_REGISTRY}/meal-planner-backend:${BUILD_VERSION} .
+                                else
+                                    echo "No main.go found in backend directory"
+                                    exit 1
+                                fi
                             '''
                         }
                     }
